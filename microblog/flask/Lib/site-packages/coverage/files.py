@@ -3,6 +3,7 @@
 
 """File wrangling."""
 
+import hashlib
 import fnmatch
 import ntpath
 import os
@@ -75,6 +76,9 @@ def canonical_filename(filename):
     return CANONICAL_FILENAME_CACHE[filename]
 
 
+MAX_FLAT = 200
+
+@contract(filename='unicode', returns='unicode')
 def flat_rootname(filename):
     """A base for a flat file name to correspond to this file.
 
@@ -86,7 +90,11 @@ def flat_rootname(filename):
 
     """
     name = ntpath.splitdrive(filename)[1]
-    return re.sub(r"[\\/.:]", "_", name)
+    name = re.sub(r"[\\/.:]", "_", name)
+    if len(name) > MAX_FLAT:
+        h = hashlib.sha1(name.encode('UTF-8')).hexdigest()
+        name = name[-(MAX_FLAT-len(h)-1):] + '_' + h
+    return name
 
 
 if env.WINDOWS:
@@ -304,7 +312,7 @@ class PathAliases(object):
 
     def pprint(self):       # pragma: debugging
         """Dump the important parts of the PathAliases, for debugging."""
-        for regex, result, _, _ in self.aliases:
+        for regex, result in self.aliases:
             print("{0!r} --> {1!r}".format(regex.pattern, result))
 
     def add(self, pattern, result):
@@ -351,7 +359,7 @@ class PathAliases(object):
         # Normalize the result: it must end with a path separator.
         result_sep = sep(result)
         result = result.rstrip(r"\/") + result_sep
-        self.aliases.append((regex, result, pattern_sep, result_sep))
+        self.aliases.append((regex, result))
 
     def map(self, path):
         """Map `path` through the aliases.
@@ -369,12 +377,11 @@ class PathAliases(object):
         of `path` unchanged.
 
         """
-        for regex, result, pattern_sep, result_sep in self.aliases:
+        for regex, result in self.aliases:
             m = regex.match(path)
             if m:
                 new = path.replace(m.group(0), result)
-                if pattern_sep != result_sep:
-                    new = new.replace(pattern_sep, result_sep)
+                new = new.replace(sep(path), sep(result))
                 new = canonical_filename(new)
                 return new
         return path
